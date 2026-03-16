@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  settings-offline.xml
+  =====================================================================
+  폐쇄망 서버에서 사용할 Maven settings.xml 템플릿
+
+  사용법:
+    1. 이 파일을 폐쇄망 서버의 ~/.m2/settings.xml 로 복사 (또는 -s 옵션 사용)
+    2. <localRepository> 경로를 실제 maven_repository 경로로 수정
+    3. mvn 명령 실행 시 --offline(-o) 플래그 추가
+
+  예시:
+    mvn package --offline -s /path/to/settings-offline.xml
+  =====================================================================
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0
+              https://maven.apache.org/xsd/settings-1.2.0.xsd">
+
+    <!--
+      폐쇄망 서버에서 압축 해제한 maven_repository 경로로 변경
+      예: /opt/maven_repository 또는 /home/user/maven_repository
+    -->
+    <localRepository>/opt/maven_repository</localRepository>
+
+    <!--
+      오프라인 모드 활성화: 외부 네트워크에 연결하지 않음
+      CLI에서 --offline(-o) 옵션으로도 지정 가능
+    -->
+    <offline>true</offline>
+
+    <profiles>
+        <profile>
+            <id>offline-repo</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <repositories>
+                <!--
+                  로컬 파일시스템 레포지토리 등록
+                  file:// URI 형식으로 localRepository 경로 지정
+                -->
+                <repository>
+                    <id>local-maven-repo</id>
+                    <name>Local Maven Repository (Offline)</name>
+                    <url>file:///opt/maven_repository</url>
+                    <releases>
+                        <enabled>true</enabled>
+                        <updatePolicy>never</updatePolicy>
+                    </releases>
+                    <snapshots>
+                        <enabled>false</enabled>
+                    </snapshots>
+                </repository>
+            </repositories>
+
+            <pluginRepositories>
+                <pluginRepository>
+                    <id>local-plugin-repo</id>
+                    <name>Local Plugin Repository (Offline)</name>
+                    <url>file:///opt/maven_repository</url>
+                    <releases>
+                        <enabled>true</enabled>
+                        <updatePolicy>never</updatePolicy>
+                    </releases>
+                    <snapshots>
+                        <enabled>false</enabled>
+                    </snapshots>
+                </pluginRepository>
+            </pluginRepositories>
+        </profile>
+    </profiles>
+
+</settings>

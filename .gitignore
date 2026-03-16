@@ -1,0 +1,21 @@
+# Maven 빌드 결과물
+target/
+*/target/
+**/target/
+
+# 내보내기 결과물 (용량이 크므로 Git 제외)
+output/
+
+# IDE
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maven wrapper
+!.mvn/wrapper/maven-wrapper.jar
