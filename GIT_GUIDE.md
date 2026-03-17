@@ -69,10 +69,10 @@ Git 을 처음 사용하는 PC 에서 딱 한 번만 실행하면 됩니다.
 
 ```bash
 # GitHub 에서 사용하는 이메일 주소로 입력
-git config --global user.email "your-email@example.com"
+git config --global user.email "cjfgml777@gmail.com"
 
 # GitHub 사용자명으로 입력
-git config --global user.name "your-github-username"
+git config --global user.name "cheol-hee-han"
 
 # 설정 확인
 git config --global --list
@@ -108,9 +108,12 @@ git add .
 #    -m 뒤에 변경 내용을 간략히 설명하는 메시지를 작성합니다
 git commit -m "init: 프로젝트 초기 설정"
 
-# 6. GitHub 원격 저장소 연결
+# 6-1. GitHub 원격 저장소 연결
 #    origin 은 원격 저장소의 별칭 (관례적으로 origin 사용)
-git remote add origin https://github.com/계정명/저장소명.git
+git remote add origin https://github.com/cheol-hee-han/maven-repo-exporter.git
+
+# 6-2. 등록된 원격 저장소 확인
+git remote -v
 
 # 7. 브랜치 이름을 main 으로 설정
 #    GitHub 의 기본 브랜치가 main 이므로 맞춰줍니다
@@ -119,6 +122,8 @@ git branch -M main
 # 8. GitHub 에 push (업로드)
 #    -u 옵션: 이후부터는 git push 만 입력해도 origin main 으로 자동 연결
 git push -u origin main
+# 또는 충돌을 무시하고 업로드 하려면
+git push -u origin main --force
 ```
 
 > **push 시 인증 요구 시:**
