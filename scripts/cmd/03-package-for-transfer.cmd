@@ -3,7 +3,17 @@ chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 REM =============================================================================
 REM 03-package-for-transfer.cmd
-REM Package output\maven_repository for air-gapped server transfer
+REM 목적: output\maven_repository 를 압축하여 폐쇄망 서버 전송용 패키지 생성
+REM
+REM 사용:
+REM   scripts\cmd\03-package-for-transfer.cmd [옵션]
+REM
+REM 옵션:
+REM   --format 값            압축 형식: zip 또는 tar.gz (기본값: zip)
+REM
+REM 예시:
+REM   scripts\cmd\03-package-for-transfer.cmd
+REM   scripts\cmd\03-package-for-transfer.cmd --format tar.gz
 REM =============================================================================
 
 set "SCRIPT_DIR=%~dp0"

@@ -39,54 +39,54 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <version>42.7.3</version>
+            <version>42.7.7</version>
         </dependency>
 
         <!-- MongoDB -->
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver-sync</artifactId>
-            <version>5.2.1</version>
+            <version>5.5.1</version>
         </dependency>
 
         <!-- Elasticsearch -->
         <dependency>
             <groupId>co.elastic.clients</groupId>
             <artifactId>elasticsearch-java</artifactId>
-            <version>8.17.10</version>
+            <version>8.18.3</version>
         </dependency>
 
         <dependency>
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>elasticsearch-rest-client</artifactId>
-            <version>8.17.10</version>
+            <version>8.18.3</version>
         </dependency>
 
         <!-- OpenTelemetry -->
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-api</artifactId>
-            <version>1.41.0</version>
+            <version>1.51.0</version>
         </dependency>
 
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-context</artifactId>
-            <version>1.41.0</version>
+            <version>1.51.0</version>
         </dependency>
 
         <!-- HTTP Client -->
         <dependency>
             <groupId>org.apache.httpcomponents.client5</groupId>
             <artifactId>httpclient5</artifactId>
-            <version>5.4.1</version>
+            <version>5.6</version>
         </dependency>
 
         <!-- Utility -->
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-            <version>33.2.1-jre</version>
+            <version>33.4.8-jre</version>
         </dependency>
 
         <dependency>

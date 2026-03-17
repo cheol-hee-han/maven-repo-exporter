@@ -2,7 +2,23 @@
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 REM =============================================================================
-REM run-all.cmd - Run scripts 01 and 03 in order
+REM run-all.cmd
+REM 목적: 01-resolve-deps, 03-package-for-transfer 스크립트를 순서대로 실행
+REM
+REM 사용:
+REM   scripts\cmd\run-all.cmd [옵션]
+REM
+REM 옵션:
+REM   --modules 값           빌드할 모듈 지정 (콤마 구분, 기본값: deps\ 전체 자동 탐색)
+REM   --with-sources         소스 JAR 도 함께 다운로드
+REM   --with-javadoc         JavaDoc JAR 도 함께 다운로드
+REM   --clean                다운로드 전 output\maven_repository 초기화
+REM   --format 값            압축 형식: zip 또는 tar.gz (기본값: zip)
+REM
+REM 예시:
+REM   scripts\cmd\run-all.cmd
+REM   scripts\cmd\run-all.cmd --modules deps/nl2sql-api --clean
+REM   scripts\cmd\run-all.cmd --modules deps/a,deps/b --with-sources --clean
 REM =============================================================================
 
 set "SCRIPT_DIR=%~dp0"

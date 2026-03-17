@@ -3,8 +3,22 @@ chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 REM =============================================================================
 REM 01-resolve-deps.cmd
-REM Download dependencies directly to output\maven_repository
-REM Uses -Dmaven.repo.local to capture all artifacts including BOMs and parent POMs
+REM 목적: 지정한 모듈(또는 전체 모듈)의 의존성을 output\maven_repository 로 직접 다운로드
+REM       -Dmaven.repo.local 을 사용하여 BOM/부모 pom 포함 모든 아티팩트를 수집
+REM
+REM 사용:
+REM   scripts\cmd\01-resolve-deps.cmd [옵션]
+REM
+REM 옵션:
+REM   --modules 값           빌드할 모듈 지정 (콤마 구분, 기본값: deps\ 전체 자동 탐색)
+REM   --with-sources         소스 JAR 도 함께 다운로드
+REM   --with-javadoc         JavaDoc JAR 도 함께 다운로드
+REM   --clean                다운로드 전 output\maven_repository 초기화
+REM
+REM 예시:
+REM   scripts\cmd\01-resolve-deps.cmd
+REM   scripts\cmd\01-resolve-deps.cmd --modules deps/spring-boot-web
+REM   scripts\cmd\01-resolve-deps.cmd --modules deps/a,deps/b --with-sources --clean
 REM =============================================================================
 
 set "SCRIPT_DIR=%~dp0"
