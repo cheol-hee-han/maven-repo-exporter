@@ -138,7 +138,8 @@ for module in "${MODULE_LIST[@]}"; do
     fi
 
     # go-offline (플러그인 포함 전체 오프라인 준비)
-    mvn dependency:go-offline \
+    # ★ dependency:go-offline 사용 금지 (ehcache JAXB POM 이슈)
+    mvn de.qaware.maven:go-offline-maven-plugin:resolve-dependencies \
         -f "$POM" \
         -Dmaven.repo.local="$OUTPUT_DIR" \
         --fail-at-end -q || FAILED=$((FAILED + 1))
@@ -146,10 +147,12 @@ for module in "${MODULE_LIST[@]}"; do
     echo "  완료: $module"
 done
 
-# _remote.repositories 메타데이터 정리
+# _remote.repositories / *.lastUpdated 메타데이터 정리
+# 이 파일들이 남아있으면 폐쇄망에서 Maven 이 네트워크 재접근을 시도함
 echo ""
 echo "메타데이터 정리 중..."
 find "$OUTPUT_DIR" -name "_remote.repositories" -delete 2>/dev/null || true
+find "$OUTPUT_DIR" -name "*.lastUpdated" -delete 2>/dev/null || true
 
 FILE_COUNT=$(find "$OUTPUT_DIR" -type f | wc -l)
 SIZE=$(du -sh "$OUTPUT_DIR" 2>/dev/null | cut -f1)

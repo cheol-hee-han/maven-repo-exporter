@@ -178,17 +178,21 @@ for /l %%i in (0,1,!LOOP_END!) do (
             call mvn dependency:resolve -Dclassifier=javadoc -f "!POM!" -Dmaven.repo.local="%OUTPUT_DIR%" --fail-at-end -T 4 -q
         )
 
-        call mvn dependency:go-offline -f "!POM!" -Dmaven.repo.local="%OUTPUT_DIR%" --fail-at-end -q
+        call mvn de.qaware.maven:go-offline-maven-plugin:resolve-dependencies -f "!POM!" -Dmaven.repo.local="%OUTPUT_DIR%" --fail-at-end -q
         if errorlevel 1 set /a FAILED+=1
 
         echo   완료: !MODULE!
     )
 )
 
-REM _remote.repositories 메타데이터 정리
+REM _remote.repositories / *.lastUpdated 메타데이터 정리
+REM 이 파일들이 남아있으면 폐쇄망에서 Maven 이 네트워크 재접근을 시도함
 echo.
 echo 메타데이터 정리 중...
 for /r "%OUTPUT_DIR%" %%f in (_remote.repositories) do (
+    if exist "%%f" del "%%f" 2>nul
+)
+for /r "%OUTPUT_DIR%" %%f in (*.lastUpdated) do (
     if exist "%%f" del "%%f" 2>nul
 )
 
@@ -197,12 +201,16 @@ for /r "%OUTPUT_DIR%" %%f in (*) do set /a FILE_COUNT+=1
 
 echo.
 echo ==============================================
-echo   완료! 의존성이 output 디렉터리에 저장되었습니다.
+echo   완료^^! 의존성이 output 디렉터리에 저장되었습니다.
 echo   경로      : %OUTPUT_DIR%
-echo   총 의존성 : !TOTAL_COUNT!개
+set "MSG_TOTAL=  총 의존성 : !TOTAL_COUNT!개"
+echo !MSG_TOTAL!
 echo   총 파일 수: !FILE_COUNT!
 echo   로그      : %LOG_FILE%
-if !FAILED! gtr 0 echo   [경고] !FAILED!개 Maven 단계에서 오류가 발생했습니다.
+if !FAILED! gtr 0 (
+    set "MSG_WARN=  [경고] !FAILED!개 Maven 단계에서 오류가 발생했습니다."
+    echo !MSG_WARN!
+)
 echo ==============================================
 
 if !FAILED! gtr 0 exit /b 1

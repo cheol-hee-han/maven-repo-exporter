@@ -1,120 +1,962 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.5</version>
-        <relativePath />
-    </parent>
+    <!--
+    ╔══════════════════════════════════════════════════════════════════════════════╗
+    ║  폐쇄망 빌드 전략                                                            ║
+    ╠══════════════════════════════════════════════════════════════════════════════╣
+    ║  [1단계] 온라인 환경: repo 수집 (두 명령 모두 실행)                           ║
+    ║    ★ mvn dependency:go-offline 사용 금지 (ehcache JAXB POM 이슈)           ║
+    ║    mvn de.qaware.maven:go-offline-maven-plugin:resolve-dependencies \        ║
+    ║        -Dmaven.repo.local=./offline-repo                                    ║
+    ║    mvn clean package -DskipTests -Dmaven.repo.local=./offline-repo          ║
+    ║    (실제 빌드로 go-offline이 놓친 plugin jar까지 수집)                        ║
+    ║                                                                              ║
+    ║  [2단계] repo 정리 ★필수 (네트워크 재접근 시도 파일 제거)                    ║
+    ║    find ./offline-repo -name "_remote.repositories" -delete                 ║
+    ║    find ./offline-repo -name "*.lastUpdated" -delete                        ║
+    ║                                                                              ║
+    ║  [3단계] 폐쇄망 이관 대상                                                    ║
+    ║    - offline-repo/ 전체 (tar.gz 압축 권장, plugin jar 포함)                  ║
+    ║    - pom.xml + src/ 전체                                                    ║
+    ║    - src/main/resources/lib/ImpalaJDBC42-2.6.35.1067.jar  ← 별도 수동 이관 ║
+    ║    - src/main/resources/lib/HiveJDBC42.jar                ← 별도 수동 이관 ║
+    ║                                                                              ║
+    ║  [4단계] 폐쇄망 빌드                                                         ║
+    ║    mvn clean package -DskipTests -o \                                       ║
+    ║        -Dmaven.repo.local=./offline-repo -Poffline-build                   ║
+    ║                                                                              ║
+    ║  [Spring Boot <parent> 태그 미사용 이유]                                     ║
+    ║    parent 사용 시 spring-boot-build POM까지 repo에 필요 (체인 3단계)         ║
+    ║    BOM import 방식은 spring-boot-dependencies 1개만 있으면 동작              ║
+    ║    → 폐쇄망 repo 구성 단순화를 위해 BOM import 방식 유지                     ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝
+    -->
 
-    <groupId>com.example.deps</groupId>
-    <artifactId>deps-nl2sql-api</artifactId>
+    <groupId>com.ibk</groupId>
+    <artifactId>nl2sql-api</artifactId>
     <version>1.0.0</version>
+
+    <name>nl2sql-api</name>
+    <description>NL to SQL API</description>
     <packaging>jar</packaging>
-    <name>Deps :: NL2SQL API</name>
 
     <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
         <java.version>17</java.version>
+        <spring.boot.version>3.4.5</spring.boot.version>
+
+        <!--
+            CDP 7.1.9 공식 upstream 버전 고정
+            출처: https://docs.cloudera.com/cdp-private-cloud-base/7.1.9/runtime-release-notes/
+            ※ hadoop.version: 원본 pom.xml 기준 3.3.1 유지
+               CDP 공식 upstream은 3.1.1이나, 기존 앱에서 3.3.1로 동작이 검증된 상태이므로 유지
+               (Hadoop 라이브러리를 유틸 용도로만 사용하는 경우 3.3.x도 호환 가능)
+        -->
+        <hadoop.version>3.3.1</hadoop.version>
+        <hive.version>3.1.3</hive.version>        <!-- CDP: 3.1.3000.7.1.9.0-387 -->
+        <atlas.version>2.1.0</atlas.version>      <!-- CDP: 2.1.0.7.1.9.0-387 -->
+        <kudu.version>1.17.0</kudu.version>       <!-- CDP: 1.17.0.7.1.9.0-387 -->
+        <ranger.version>2.4.0</ranger.version>    <!-- CDP: 2.4.0.7.1.9.0-387 -->
+
+        <!-- ES 8.x 요구사항. elasticsearch-java 와 elasticsearch-rest-client 버전 반드시 일치 -->
+        <elasticsearch.version>8.18.3</elasticsearch.version>
+
+        <!-- Prometheus Java Client 1.x (구 simpleclient 0.16.0 deprecated 대체) -->
+        <prometheus.version>1.3.6</prometheus.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+
+            <!--
+                Spring Boot BOM (3.4.5 기준 주요 managed 버전)
+                HikariCP 5.1.0 / Hibernate 6.6.x / Jackson 2.18.x
+                Lombok 1.18.x / Micrometer 1.14.x / OpenTelemetry 1.44.x
+                EHCache 3.10.x / Quartz 2.3.x / SLF4J 2.0.x / Logback 1.5.x
+            -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring.boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!--
+                snappy-java 1.1.10.7
+                CVE-2023-34453/34454/34455 패치
+                Hadoop/Hive/Parquet 전이 의존성의 1.1.8.x 강제 override
+            -->
+            <dependency>
+                <groupId>org.xerial.snappy</groupId>
+                <artifactId>snappy-java</artifactId>
+                <version>1.1.10.7</version>
+            </dependency>
+
+            <!--
+                Netty BOM 4.1.119.Final
+                Hadoop HDFS 클라이언트의 구버전 Netty CVE 차단 (CVE-2024-47535 등)
+            -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>4.1.119.Final</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!--
+                Log4j2 BOM 2.24.3
+                Log4Shell(CVE-2021-44228) 및 후속 CVE 대응
+                Hive/Hadoop/Ranger 전이 의존성의 구버전 log4j 강제 upgrade
+            -->
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-bom</artifactId>
+                <version>2.24.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- commons-codec 1.17.2: Hadoop/Hive 전이 의존성 구버전 override -->
+            <dependency>
+                <groupId>commons-codec</groupId>
+                <artifactId>commons-codec</artifactId>
+                <version>1.17.2</version>
+            </dependency>
+
+            <!--
+                woodstox-core 7.0.0
+                jackson-dataformat-xml 2.18.x 가 7.x 를 요구하나
+                Hadoop 전이 의존성이 5.3.0 으로 다운그레이드 → XML 직렬화 런타임 에러 방지
+            -->
+            <dependency>
+                <groupId>com.fasterxml.woodstox</groupId>
+                <artifactId>woodstox-core</artifactId>
+                <version>7.0.0</version>
+            </dependency>
+
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
 
-        <!-- Jackson -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-        </dependency>
+        <!-- ===================================== -->
+        <!-- Spring Boot Core Starters             -->
+        <!-- ===================================== -->
 
-        <!-- Spring Boot -->
+        <!-- REST API 서버: spring-webmvc, jackson-databind, 내장 Tomcat, slf4j/logback 포함 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- PostgreSQL -->
+        <!-- 운영 모니터링: health check, metrics, info 등 /actuator 엔드포인트 제공 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- ORM / 커넥션 풀: Hibernate, HikariCP, spring-data-jpa 포함 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- 메타데이터 동기화 등 주기적 배치/스케줄링 작업 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-quartz</artifactId>
+        </dependency>
+
+        <!-- Bean Validation (@Valid, @NotNull 등) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- 사내 LDAP 사용자 인증 / 조직 정보 조회 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-ldap</artifactId>
+        </dependency>
+
+        <!-- EHCache + Spring Cache 추상화: 메타데이터/설정 캐싱 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
+        <!--
+            ehcache (BOM managed 3.10.x)
+            classifier=jakarta: Jakarta XML Binding (JAXB 4.x) 사용으로 Spring Boot 3.x 호환
+            전이 의존성 전체 차단 필수: ehcache POM 이 구 jaxb-runtime 2.3.0-b* 를 선언하고
+            이 프리릴리즈 POM 이 폐쇄된 maven.java.net HTTP 레포를 참조
+            → dependency:go-offline 시 exclusion/dependencyManagement 적용 전에
+              POM 체인을 원본 버전으로 resolve 시도하여 Maven 3.8+ HTTP 차단 에러 발생
+            jakarta jar 은 자체 완결이며 필요한 JAXB 4.x 는 Spring Boot BOM 에서 제공
+        -->
+        <dependency>
+            <groupId>org.ehcache</groupId>
+            <artifactId>ehcache</artifactId>
+            <classifier>jakarta</classifier>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- 개발 편의: 코드 변경 시 자동 재시작. optional=true → fat-jar 미포함 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- ==================== -->
+        <!-- Swagger / OpenAPI    -->
+        <!-- ==================== -->
+
+        <!-- REST API 문서 자동 생성 및 Swagger UI 제공 -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.8.9</version>
+        </dependency>
+
+        <!-- ======================================= -->
+        <!-- Data Format (Parquet / Avro / CSV / XML) -->
+        <!-- ======================================= -->
+
+        <!--
+            parquet-avro 1.14.4: HDFS/Hive 테이블 Parquet 파일 읽기/쓰기
+            CDP 내부 Parquet 1.10.x 기반이나 클라이언트는 상위 호환
+            CDP 클러스터 파일 직접 I/O 시 호환성 검증 필요
+        -->
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-avro</artifactId>
+            <version>1.14.4</version>
+        </dependency>
+
+        <!--
+            avro 1.11.4: Parquet/Hive 스키마 직렬화 포맷
+            CDP 7.1.9 upstream 계열 1.11.x 최신 패치
+            1.12.x 는 API 변경 / Java 8 지원 중단으로 Hive/Hadoop 호환성 리스크
+        -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>1.11.4</version>
+        </dependency>
+
+        <!-- 쿼리 결과 CSV 내보내기/가져오기 -->
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>5.9</version>
+        </dependency>
+
+        <!-- Parquet/Hadoop 데이터 압축 코덱: dependencyManagement 의 1.1.10.7 적용 -->
+        <dependency>
+            <groupId>org.xerial.snappy</groupId>
+            <artifactId>snappy-java</artifactId>
+        </dependency>
+
+        <!--
+            jackson-dataformat-xml (BOM managed): XML 직렬화/역직렬화
+            woodstox-core 7.x 필요 → dependencyManagement 에서 버전 고정
+            ※ XmlMapper / @JacksonXmlProperty 등 XML 직렬화 코드 없으면 제거 권장
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-xml</artifactId>
+        </dependency>
+
+        <!-- ======================== -->
+        <!-- JDBC / DB Drivers        -->
+        <!-- ======================== -->
+
+        <!-- NL2SQL 메타데이터 및 쿼리 이력 저장용 -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <version>42.7.7</version>
         </dependency>
 
-        <!-- MongoDB -->
+        <!--
+            mongodb-driver-sync 5.5.1: NL2SQL 대화 이력/로그 저장용
+            드라이버 전체(driver-sync/driver-core/bson) 버전 통일로
+            NoSuchMethodError 방지 (Spring Boot BOM managed 버전과 불일치 이슈 대응)
+        -->
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver-sync</artifactId>
             <version>5.5.1</version>
         </dependency>
 
-        <!-- Elasticsearch -->
+        <!--
+            Cloudera Impala / Hive JDBC (system scope)
+            ★ 폐쇄망 필수 수동 이관: maven repo 에 포함되지 않음
+              src/main/resources/lib/ 디렉토리를 소스코드와 함께 이관
+        -->
+        <!-- <dependency>
+            <groupId>com.cloudera</groupId>
+            <artifactId>impala-jdbc</artifactId>
+            <version>2.6.35.1067</version>
+            <scope>system</scope>
+            <systemPath>${basedir}/src/main/resources/lib/ImpalaJDBC42-2.6.35.1067.jar</systemPath>
+        </dependency>
+
+        <dependency>
+            <groupId>com.cloudera</groupId>
+            <artifactId>hive-jdbc</artifactId>
+            <version>2.6.35.1067</version>
+            <scope>system</scope>
+            <systemPath>${basedir}/src/main/resources/lib/HiveJDBC42.jar</systemPath>
+        </dependency> -->
+
+        <!--
+            log4jdbc-log4j2 1.16: JDBC 쿼리 로깅 (실행 SQL / 바인드 파라미터 출력)
+            ※ 장기 미관리 라이브러리 (마지막 릴리즈 2015년)
+            기존 코드 호환을 위해 유지하되, 신규 코드에서는 아래 대안 사용 권장
+        -->
+        <dependency>
+            <groupId>org.bgee.log4jdbc-log4j2</groupId>
+            <artifactId>log4jdbc-log4j2-jdbc4.1</artifactId>
+            <version>1.16</version>
+        </dependency>
+
+        <!--
+            datasource-proxy 1.10.1: log4jdbc 대체 권장 라이브러리
+            DataSource 래핑 방식으로 쿼리 로깅 / 슬로우 쿼리 감지 / 실행 시간 측정
+            Spring Boot 자동 설정과 호환성 우수, 활발히 유지보수 중
+        -->
+        <dependency>
+            <groupId>net.ttddyy</groupId>
+            <artifactId>datasource-proxy</artifactId>
+            <version>1.10.1</version>
+        </dependency>
+
+        <!-- ================================== -->
+        <!-- Elasticsearch 8.x                  -->
+        <!-- ================================== -->
+
+        <!--
+            elasticsearch-java + elasticsearch-rest-client 버전 반드시 일치
+            Spring Boot BOM 이 ES Java Client 를 managed 하지 않으므로 버전 명시 필수
+            elasticsearch-java 가 jakarta.json-api 를 전이 의존성으로 포함
+        -->
         <dependency>
             <groupId>co.elastic.clients</groupId>
             <artifactId>elasticsearch-java</artifactId>
-            <version>8.18.3</version>
+            <version>${elasticsearch.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>elasticsearch-rest-client</artifactId>
-            <version>8.18.3</version>
+            <version>${elasticsearch.version}</version>
         </dependency>
 
-        <!-- OpenTelemetry -->
-        <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-api</artifactId>
-            <version>1.51.0</version>
-        </dependency>
-
-        <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-context</artifactId>
-            <version>1.51.0</version>
-        </dependency>
-
-        <!-- HTTP Client -->
+        <!-- ES REST client / 외부 API 호출용 HTTP transport -->
         <dependency>
             <groupId>org.apache.httpcomponents.client5</groupId>
             <artifactId>httpclient5</artifactId>
             <version>5.6</version>
         </dependency>
 
-        <!-- Utility -->
+        <!-- ============================================ -->
+        <!-- CDP Components (Hadoop / Hive / Atlas 등)    -->
+        <!-- ============================================ -->
+
+        <!--
+            atlas-client-v2 2.1.0 (CDP 7.1.9 서버 버전 일치)
+            Atlas REST API 를 통한 테이블/컬럼 메타데이터 조회
+            ※ 폐쇄망: 전이 의존성 매우 많음 → go-offline 시 시간 충분히 확보
+            Jersey, 구버전 guava, log4j 전이 의존성 차단
+        -->
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-client-v2</artifactId>
+            <version>${atlas.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.sun.jersey</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.sun.jersey.contribs</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- kudu-client 1.17.0: Kudu 테이블 실시간 읽기/쓰기 (CDP 7.1.9 버전 일치) -->
+        <dependency>
+            <groupId>org.apache.kudu</groupId>
+            <artifactId>kudu-client</artifactId>
+            <version>${kudu.version}</version>
+        </dependency>
+
+        <!--
+            hive-metastore 3.1.3: Hive 메타스토어 Thrift API 를 통한 스키마 조회
+            hive-exec 3.1.3: HiveQL 파싱 / 실행 계획 분석
+            (CDP 7.1.9 upstream base)
+            ※ hive-exec 는 전이 의존성 수백 개 → 폐쇄망 repo 용량 수 GB 가능
+               실제 사용 여부 재확인 후 불필요하면 제거 권장
+        -->
+        <dependency>
+            <groupId>org.apache.hive</groupId>
+            <artifactId>hive-metastore</artifactId>
+            <version>${hive.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.hive</groupId>
+            <artifactId>hive-exec</artifactId>
+            <version>${hive.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.pentaho</groupId>
+                    <artifactId>pentaho-aggdesinger-algorithm</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.logging.log4j</groupId>
+                    <artifactId>log4j-slf4j-impl</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.codehaus.janino</groupId>
+                    <artifactId>janino</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.codehaus.janino</groupId>
+                    <artifactId>commons-compiler</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.xerial.snappy</groupId>
+                    <artifactId>snappy-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!--
+            Hadoop 3.3.1: HDFS 파일 I/O 및 MapReduce 클라이언트
+            CDP 7.1.9 공식 upstream 은 3.1.1 이나 기존 앱에서 3.3.1 로 동작 검증됨
+            보안 취약 log4j / 구버전 guava 전이 의존성 차단
+        -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.xerial.snappy</groupId>
+                    <artifactId>snappy-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-hdfs</artifactId>
+            <version>${hadoop.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-mapreduce-client-jobclient</artifactId>
+            <version>${hadoop.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!--
+            ranger-plugins-common 2.4.0: Ranger 정책 기반 접근 제어 연동 (CDP 7.1.9 버전 일치)
+            aws-java-sdk-bundle 수백MB → 폐쇄망 repo 용량 절감을 위해 반드시 exclusion
+        -->
+        <dependency>
+            <groupId>org.apache.ranger</groupId>
+            <artifactId>ranger-plugins-common</artifactId>
+            <version>${ranger.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.amazonaws</groupId>
+                    <artifactId>aws-java-sdk-bundle</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.guava</groupId>
+                    <artifactId>guava</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!--
+            guava 33.4.8-jre: CDP 전이 의존성 버전 통합
+            Hadoop/Hive/Atlas/Ranger 의 구버전 guava exclusion 과 조합하여
+            클래스패스에 단일 최신 버전만 존재하도록 강제
+        -->
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
             <version>33.4.8-jre</version>
         </dependency>
 
+        <!-- ====================== -->
+        <!-- Utility                -->
+        <!-- ====================== -->
+
+        <!-- commons-lang3: 문자열/리플렉션 유틸. BOM managed (3.17.0) -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+        </dependency>
+
+        <!-- commons-io 2.18.0: 파일/스트림 유틸 -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.18.0</version>
+        </dependency>
+
+        <!-- JSON 응답 내 특정 경로 값 추출/필터링 ($.store.book[*].author 등) -->
+        <dependency>
+            <groupId>com.jayway.jsonpath</groupId>
+            <artifactId>json-path</artifactId>
+            <version>2.9.0</version>
+        </dependency>
+
+        <!-- 패스워드 정책 검증 (길이/복잡도/사전 단어 등) -->
         <dependency>
             <groupId>org.passay</groupId>
             <artifactId>passay</artifactId>
             <version>1.6.6</version>
         </dependency>
 
-        <!-- Jakarta JSON -->
+        <!-- HTML 파싱 및 텍스트 추출 -->
         <dependency>
-            <groupId>jakarta.json</groupId>
-            <artifactId>jakarta.json-api</artifactId>
-            <version>2.1.3</version>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.18.3</version>
         </dependency>
 
-        <!-- Lombok -->
+        <!--
+            commons-math3 3.6.1: 통계/수치 연산
+            ※ org.apache.commons.math3.* import 없으면 제거 권장
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.6.1</version>
+        </dependency>
+
+        <!-- ================================= -->
+        <!-- Observability (추적 / 메트릭)      -->
+        <!-- ================================= -->
+
+        <!--
+            opentelemetry-api (BOM managed): 분산 추적(tracing) API
+            요청 흐름 추적 및 span 생성용
+            opentelemetry-context 는 api 전이 의존성으로 자동 포함
+        -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+        </dependency>
+
+        <!--
+            micrometer-registry-prometheus (BOM managed)
+            Spring Boot Actuator + Micrometer 조합으로 /actuator/prometheus 자동 제공
+            prometheus-metrics-core / instrumentation-jvm / exporter-httpserver 는
+            Micrometer 가 내부적으로 처리 → 별도 선언 불필요
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!--
+            Pushgateway 로 메트릭 직접 push 시에만 필요
+            ※ Pushgateway push 코드 없으면 제거 권장
+        -->
+        <dependency>
+            <groupId>io.prometheus</groupId>
+            <artifactId>prometheus-metrics-exporter-pushgateway</artifactId>
+            <version>${prometheus.version}</version>
+        </dependency>
+
+        <!--
+            구 simpleclient 0.16.0 API(io.prometheus.client.*) 호환 브리지
+            ※ 직접 사용 코드 없으면 제거 권장
+        -->
+        <dependency>
+            <groupId>io.prometheus</groupId>
+            <artifactId>prometheus-metrics-simpleclient-bridge</artifactId>
+            <version>${prometheus.version}</version>
+        </dependency>
+
+        <!-- ==================== -->
+        <!-- Lombok               -->
+        <!-- ==================== -->
+
+        <!-- BOM managed, 컴파일 전용 (fat-jar 미포함) -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
 
-        <!-- Test -->
+        <!-- ======================================= -->
+        <!-- Test                                    -->
+        <!-- ======================================= -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!--
+            Testcontainers (BOM managed): 통합 테스트용 컨테이너 자동 관리
+            ※ 폐쇄망 주의: 테스트 실행 시 Docker Hub 이미지 pull 필요
+               폐쇄망 환경 선택지:
+               1) 사내 Docker registry 미러 구성 후 testcontainers.properties 설정
+               2) 폐쇄망에서는 -DskipTests 빌드 → Maven jar 자체는 문제 없음
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>elasticsearch</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
+
+    <build>
+
+        <!--
+            라이프사이클 플러그인 버전 고정 (Spring Boot 3.4.5 parent 기준)
+            parent 미사용 시 Maven super-pom 기본 버전에 의존하게 되어
+            온라인/폐쇄망 Maven 버전이 다르면 빌드 실패 가능
+        -->
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-clean-plugin</artifactId>
+                    <version>3.4.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <version>3.3.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.4.2</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-install-plugin</artifactId>
+                    <version>3.1.4</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
+        <resources>
+            <resource>
+                <directory>src/main/resources/hadoop-conf</directory>
+                <includes>
+                    <include>**/*.xml</include>
+                </includes>
+                <!-- 클래스패스 최상위로 복사 -->
+                <targetPath>.</targetPath>
+                <filtering>false</filtering>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+        </resources>
+
+        <plugins>
+
+            <!-- Maven Compiler Plugin 3.14.0 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.14.0</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                    <encoding>${project.build.sourceEncoding}</encoding>
+                    <annotationProcessors>
+                        <annotationProcessor>
+                            lombok.launch.AnnotationProcessorHider$AnnotationProcessor
+                        </annotationProcessor>
+                    </annotationProcessors>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                        <!-- javac 프로세스(JVM) 자체에 대한 add-opens (-J 접두사) -->
+                        <arg>-J--add-opens=java.base/java.lang=ALL-UNNAMED</arg>
+                        <arg>-J--add-opens=java.base/java.util=ALL-UNNAMED</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- Spring Boot Maven Plugin -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring.boot.version}</version>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                    <!--
+                        system scope jar 를 fat-jar 에 포함
+                        Impala/Hive JDBC 등 system scope 의존성 활성화 시 필요
+                    -->
+                    <includeSystemScope>true</includeSystemScope>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Maven Enforcer Plugin: JDK 17+, Maven 3.8+ 강제 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>enforce</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireMavenVersion>
+                                    <version>[3.8,)</version>
+                                </requireMavenVersion>
+                                <requireJavaVersion>
+                                    <version>[17,)</version>
+                                </requireJavaVersion>
+                                <banDuplicatePomDependencyVersions/>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Maven Surefire Plugin 3.5.3 (JUnit 5 + JDK 17)
+                ※ 운영 실행 스크립트에도 동일 add-opens 옵션 추가 필요
+                   (java.base/java.lang, java.util, java.io 모듈 ALL-UNNAMED 개방)
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.3</version>
+                <configuration>
+                    <argLine>
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                        --add-opens java.base/java.io=ALL-UNNAMED
+                        --add-opens java.base/java.nio=ALL-UNNAMED
+                        --add-opens java.base/sun.nio.ch=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
+
+            <!--
+                go-offline-maven-plugin 1.2.8 (폐쇄망 repo 수집 전용)
+                표준 dependency:go-offline의 한계 보완:
+                - Surefire 동적 로딩 junit-platform provider 명시
+                - Spring Boot loader jar 명시
+                실행 (온라인 환경에서 1회):
+                mvn de.qaware.maven:go-offline-maven-plugin:resolve-dependencies \
+                    -Dmaven.repo.local=./offline-repo
+            -->
+            <plugin>
+                <groupId>de.qaware.maven</groupId>
+                <artifactId>go-offline-maven-plugin</artifactId>
+                <version>1.2.8</version>
+                <configuration>
+                    <dynamicDependencies>
+                        <DynamicDependency>
+                            <groupId>org.apache.maven.surefire</groupId>
+                            <artifactId>surefire-junit-platform</artifactId>
+                            <version>3.5.3</version>
+                            <repositoryType>PLUGIN</repositoryType>
+                        </DynamicDependency>
+                        <DynamicDependency>
+                            <groupId>org.apache.maven.surefire</groupId>
+                            <artifactId>surefire-junit4</artifactId>
+                            <version>3.5.3</version>
+                            <repositoryType>PLUGIN</repositoryType>
+                        </DynamicDependency>
+                        <DynamicDependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-loader</artifactId>
+                            <version>${spring.boot.version}</version>
+                            <repositoryType>MAIN</repositoryType>
+                        </DynamicDependency>
+                        <DynamicDependency>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-loader-classic</artifactId>
+                            <version>${spring.boot.version}</version>
+                            <repositoryType>MAIN</repositoryType>
+                        </DynamicDependency>
+                    </dynamicDependencies>
+                </configuration>
+            </plugin>
+
+            <!--
+                OWASP Dependency-Check 12.1.1
+                기본 빌드에서는 비활성화 (phase=none)
+                온라인 CI에서는 -Powasp-scan 프로파일로 활성화
+                폐쇄망 사용 시: NVD 데이터 사전 다운로드 후 dataDirectory 설정
+            -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>12.1.1</version>
+                <configuration>
+                    <failBuildOnCVSS>7</failBuildOnCVSS>
+                    <suppressionFile>owasp-suppressions.xml</suppressionFile>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <phase>none</phase>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+    </build>
+
+    <profiles>
+        <!--
+            폐쇄망 빌드 전용 프로파일 (-Poffline-build)
+            네트워크 접근이 필요한 플러그인 동작 차단
+        -->
+        <profile>
+            <id>offline-build</id>
+            <properties>
+                <dependency-check.skip>true</dependency-check.skip>
+            </properties>
+        </profile>
+    </profiles>
 
 </project>
