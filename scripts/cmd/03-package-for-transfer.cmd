@@ -43,7 +43,7 @@ exit /b 1
 
 if not exist "%OUTPUT_DIR%" (
     echo [오류] %OUTPUT_DIR% 가 없습니다.
-    echo   먼저 02-export-m2.cmd 를 실행하여 의존성을 내보내세요.
+    echo   먼저 01-resolve-deps.cmd 를 실행하여 의존성을 다운로드하세요.
     exit /b 1
 )
 

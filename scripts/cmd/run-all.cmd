@@ -2,13 +2,12 @@
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 REM =============================================================================
-REM run-all.cmd - Run scripts 01 to 03 in order
+REM run-all.cmd - Run scripts 01 and 03 in order
 REM =============================================================================
 
 set "SCRIPT_DIR=%~dp0"
 
 set "ARGS_STEP1="
-set "ARGS_STEP2="
 set "ARGS_STEP3="
 
 :parse_args
@@ -30,7 +29,6 @@ if "%~1"=="" goto :missing_modules
 set "CHK=%~1"
 if "!CHK:~0,2!"=="--" goto :missing_modules
 set "ARGS_STEP1=!ARGS_STEP1! --modules %~1"
-set "ARGS_STEP2=!ARGS_STEP2! --modules %~1"
 shift
 goto :parse_args
 
@@ -50,7 +48,7 @@ shift
 goto :parse_args
 
 :arg_clean
-set "ARGS_STEP2=!ARGS_STEP2! --clean"
+set "ARGS_STEP1=!ARGS_STEP1! --clean"
 shift
 goto :parse_args
 
@@ -69,7 +67,7 @@ exit /b 1
 
 echo.
 echo ================================================================
-echo   [Step 1/3] 의존성 다운로드 중...
+echo   [Step 1/2] 의존성 다운로드 중...
 echo ================================================================
 call "%SCRIPT_DIR%01-resolve-deps.cmd" !ARGS_STEP1!
 if errorlevel 1 (
@@ -79,21 +77,11 @@ if errorlevel 1 (
 
 echo.
 echo ================================================================
-echo   [Step 2/3] 의존성 내보내기 중...
-echo ================================================================
-call "%SCRIPT_DIR%02-export-m2.cmd" !ARGS_STEP2!
-if errorlevel 1 (
-    echo [오류] Step 2 실패. 중단합니다.
-    exit /b 1
-)
-
-echo.
-echo ================================================================
-echo   [Step 3/3] 전송용 패키지 생성 중...
+echo   [Step 2/2] 전송용 패키지 생성 중...
 echo ================================================================
 call "%SCRIPT_DIR%03-package-for-transfer.cmd" !ARGS_STEP3!
 if errorlevel 1 (
-    echo [오류] Step 3 실패. 중단합니다.
+    echo [오류] Step 2 실패. 중단합니다.
     exit /b 1
 )
 
@@ -113,7 +101,7 @@ echo   --modules 값         빌드할 모듈 지정 (콤마 구분)
 echo                        기본값: deps\ 하위 전체 자동 탐색
 echo   --with-sources       소스 JAR 도 함께 다운로드
 echo   --with-javadoc       JavaDoc JAR 도 함께 다운로드
-echo   --clean              export 전 output 디렉터리 초기화
+echo   --clean              다운로드 전 output\maven_repository 초기화
 echo   --format 값          압축 형식: zip 또는 tar.gz (기본값: zip)
 echo   --help               이 도움말 표시
 echo.

@@ -22,7 +22,7 @@ for arg in "$@"; do
 done
 
 if [ ! -d "$OUTPUT_DIR" ]; then
-    echo "ERROR: $OUTPUT_DIR 가 없습니다. 먼저 02-export-m2.sh 를 실행하세요."
+    echo "ERROR: $OUTPUT_DIR 가 없습니다. 먼저 01-resolve-deps.sh 를 실행하세요."
     exit 1
 fi
 
